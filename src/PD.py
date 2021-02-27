@@ -5,11 +5,43 @@ import itertools as it
 import typing
 import random
 
+#All RL packafe
+import torch as T
+import torch.nn as nn
+import torch.nn.functional as F #for the activation function
+import torch.optim as optim
+
 from numpy.core.arrayprint import _leading_trailing
 from numpy.core.numeric import NaN
 
 Strategy = {'C':0 , 'D':1}
 PD = [[3, 0], [5, 1]]
+
+class DeepQNetwork(nn.Module): #Give access to a lot of function
+
+    def __init__(self, lr, input_dim, fc1_dim, fc2_dim, output_dim):
+        super(DeepQNetwork, self).__init__()
+        self.input_dim = input_dim
+        self.fc1_dim = fc1_dim
+        self.fc2_dim = fc2_dim
+        self.output_dim = output_dim
+
+        self.fc1 = nn.Linear(*self.input_dim, self.fc1_dim)
+        self.fc2 = nn.Linear(self.fc1_dim, self.fc2_dim)
+        self.fc3 = nn.Linear(self.fc2_dim, self.output_dim)
+
+        self.optimize = optim.Adam(self.parameters(), lr=lr)
+        self.loss = nn.MSELoss()
+
+        self.device = T.device('cuda:0' if T.cuda.is_available() else 'cpu')
+        self.to(self.device)    
+
+    def forward(self, state):
+        x = F.relu(self.fc1(state))
+        x = F.relu(self.fc2(x))
+        action = self.fc3(x)
+
+        return action    
 
 class Agent:
 
@@ -21,6 +53,27 @@ class Agent:
 
     def update(self, *args, **kwargs) -> None:
         raise NotImplementedError 
+
+class DeepRLNetwork(Agent):
+
+    def __init__(self, gamma, epsilon, lr, input_dim, batch_size, n_actions, max_mem_size=100000,
+        eps_end=0.01, eps_dec=5e-4):
+        self.gamma = gamma
+        self.epsilon = epsilon
+        self.eps_min = eps_end
+        self.eps_dec = eps_dec
+        self.lr = lr
+        self.actions_space = [i for i in range(n_actions)]
+        self.mem_size = max_mem_size
+        self.batch_size = batch_size
+        self.mem_cntr = 0
+
+        self.Q_eval = DeepQNetwork(lr, input_dim=input_dim, fc1_dim=256, fc2_dim=256, output_dim=n_actions)
+
+        self.state_memory = np.zeros((self.mem_size, *input_dim), dtype=np.float32)
+        self.new_state_memory = np.zeros((self.mem_size, *input_dim), dtype=np.float32)
+        self.action_memory = np.zeros(self.mem_size, dtype=np.int32)
+        self.reward_memory = np.zeros(self.mem_size, dtype=np.int32)
 
 class RLAgent(Agent):
 
@@ -63,6 +116,7 @@ class RLAgent(Agent):
         self.__updateQtable(opponent_action, reward)
 
     def __updateQtable(self, opponent_action, reward) -> None:
+        print(self.learning_rate, self.gamma, reward)
         new_state = "".join((self.action, opponent_action))
         self.avg_reward = np.append(self.avg_reward, reward)
         if self.state == None:
@@ -80,7 +134,7 @@ class RLAgent(Agent):
 class CooperativeAgent(Agent):
     def __init__(self) -> None:
         super().__init__()
-        self.action = 'C'
+        self.action = 0 #->cooperate
 
     def getAction(self) -> str:
         return self.action
@@ -91,7 +145,7 @@ class CooperativeAgent(Agent):
 class DefectiveAgent(Agent):
     def __init__(self) -> None:
         super().__init__()
-        self.action = 'D'
+        self.action = 1 #->Defect
 
     def getAction(self) -> str:
         return self.action
@@ -102,7 +156,7 @@ class DefectiveAgent(Agent):
 class TitForTatAgent(Agent):
     def __init__(self) -> None:
         super().__init__()
-        self.action = 'C'
+        self.action = 0
 
     def getAction(self) -> str:
             return self.action
@@ -114,7 +168,7 @@ class TitForTatAgent(Agent):
 
 if __name__ == "__main__":
 
-    rl_agent = RLAgent(1, 0.8, 0.1)
+    rl_agent = RLAgent(0.1, 0.8, 0.1)
     adversary  = DefectiveAgent()
 
     nbr_episode = 100000
