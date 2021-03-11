@@ -4,6 +4,7 @@ from collections import Counter
 import itertools as it
 import typing
 import random
+from tqdm import tqdm
 
 #All RL packafe
 import torch as T
@@ -36,25 +37,13 @@ class DeepQNetwork(nn.Module): #Give access to a lot of function
         self.device = T.device('cuda:0' if T.cuda.is_available() else 'cpu')
         self.to(self.device)    
 
-    def forward(self, state):
+    def forward(self, state):  
         x = F.relu(self.fc1(state))
         x = F.relu(self.fc2(x))
         action = self.fc3(x)
-
         return action    
 
-class Agent:
-
-    def takeAction(self) -> None:
-        raise NotImplementedError 
-
-    def getAction(self) -> str:
-        raise NotImplementedError  
-
-    def update(self, *args, **kwargs) -> None:
-        raise NotImplementedError 
-
-class DeepRLNetwork(Agent):
+class DeepRLNetwork():
 
     def __init__(self, gamma, epsilon, lr, input_dim, batch_size, n_actions, max_mem_size=100000,
         eps_end=0.01, eps_dec=5e-4):
@@ -69,11 +58,67 @@ class DeepRLNetwork(Agent):
         self.mem_cntr = 0
 
         self.Q_eval = DeepQNetwork(lr, input_dim=input_dim, fc1_dim=256, fc2_dim=256, output_dim=n_actions)
-
+        
+        #*input_dim -> actions of all the agent
         self.state_memory = np.zeros((self.mem_size, *input_dim), dtype=np.float32)
         self.new_state_memory = np.zeros((self.mem_size, *input_dim), dtype=np.float32)
         self.action_memory = np.zeros(self.mem_size, dtype=np.int32)
         self.reward_memory = np.zeros(self.mem_size, dtype=np.int32)
+
+
+    def storeTransition(self, state, action, reward, new_state):
+        index = self.mem_cntr%self.mem_size
+
+        self.state_memory[index] = state
+        self.new_state_memory[index] = new_state
+        self.reward_memory[index] = reward
+        self.action_memory[index] = action
+
+        self.mem_cntr += 1
+
+    def chooseAction(self, observation):
+        if np.random.rand() > self.epsilon:
+            state = T.tensor([observation], dtype=T.float).to(self.Q_eval.device)
+            actions = self.Q_eval.forward(state)
+            action = T.argmax(actions).item() #Because return a tensor
+        else:
+            action = np.random.choice(self.actions_space)
+        return action
+
+    def learn(self):
+        if self.mem_cntr < self.batch_size:
+            return #not enough data to learn
+
+        self.Q_eval.optimize.zero_grad() #Particular in pytorch
+        max_mem = min(self.mem_size, self.mem_cntr) #until self.mem_size < self.mem_cntr
+        batch = np.random.choice(max_mem, self.batch_size, replace=False)
+        
+        batch_index = np.arange(self.batch_size, dtype=np.int32)
+
+        state_batch = T.tensor(self.state_memory[batch]).to(self.Q_eval.device)
+        new_state_batch= T.tensor(self.new_state_memory[batch]).to(self.Q_eval.device)
+        reward_batch = T.tensor(self.reward_memory[batch]).to(self.Q_eval.device)
+        action_batch = self.action_memory[batch]
+
+        q_eval = self.Q_eval.forward(state_batch)[batch_index, action_batch]
+        q_next = self.Q_eval.forward(new_state_batch)
+
+        q_target = reward_batch + self.gamma * T.max(q_next, dim=1)[0]
+
+        loss = self.Q_eval.loss(q_target, q_eval).to(self.Q_eval.device)
+        loss.backward()
+        self.Q_eval.optimize.step()
+
+class Agent:
+
+    def takeAction(self) -> None:
+        raise NotImplementedError 
+
+    def getAction(self) -> str:
+        raise NotImplementedError  
+
+    def update(self, *args, **kwargs) -> None:
+        raise NotImplementedError 
 
 class RLAgent(Agent):
 
@@ -168,20 +213,38 @@ class TitForTatAgent(Agent):
 
 if __name__ == "__main__":
 
-    rl_agent = RLAgent(0.1, 0.8, 0.1)
+    rl_agent =DeepRLNetwork(gamma=0.8, epsilon=0.1, lr=0.01, input_dim=[2], batch_size=64, n_actions=2)
     adversary  = DefectiveAgent()
 
     nbr_episode = 100000
 
-    for i in range(nbr_episode):
-        rl_agent.takeAction()
+    state = np.array([0,0])
+    new_state = np.zeros(2)
 
+    cooperation_level = 0
+
+    print(rl_agent.Q_eval.forward(T.tensor([0, 0], dtype=T.float)))
+
+    for i in tqdm(range(nbr_episode)):
+
+        rl_action = rl_agent.chooseAction(state)
         adversary_action = adversary.getAction()
 
-        reward = PD[Strategy[rl_agent.getAction()]][Strategy[adversary_action]]
+        new_state[0], new_state[1] = rl_action, adversary_action
+        reward = PD[rl_action][adversary_action]
 
-        rl_agent.update(adversary_action, reward)
-        adversary.update(rl_agent.getAction())
+        rl_agent.storeTransition(state, rl_action, reward, new_state)
+        rl_agent.learn()
+
+        state = new_state
+        adversary.update(rl_action)
+        cooperation_level += rl_action
+
+    print(1-(cooperation_level/nbr_episode))
+    print(rl_agent.Q_eval.forward([0, 0]))
+    print(rl_agent.Q_eval.forward([0, 1]))
+    print(rl_agent.Q_eval.forward([1, 0]))
+    print(rl_agent.Q_eval.forward([1, 1]))
 
 
     print(rl_agent)
