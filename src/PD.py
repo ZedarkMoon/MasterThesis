@@ -97,6 +97,7 @@ class DeepRLNetwork():
         state = T.tensor([observation], dtype=T.float).to(self.Q_eval.device)
         actions = self.Q_eval.forward(state)
         action = T.argmax(actions).item()
+        print(actions)
         return action
 
     def learn(self):
@@ -238,11 +239,11 @@ class TitForTatAgent(Agent):
     
 
 def saveTrainedModel(model, name):
-    T.save(model.state_dict(), f"../Models/{name}.pt")
+    T.save(model.state_dict(), f"Models/{name}.pt")
 
 def loadTrainedModel(name):
     model = DeepQNetwork(fc1_dim=256, fc2_dim=256, lr=0.01, input_dim=[2], output_dim=2)
-    model.load_state_dict(T.load(f"../Models/{name}.pt"))
+    model.load_state_dict(T.load(f"Models/{name}.pt"))
     model.eval()
     return model
 
@@ -263,11 +264,11 @@ def train():
         state = new_state
         adversary.update(rl_action)
         cooperation_level += rl_action
-    saveTrainedModel(rl_agent.Q_eval, MODEL_NAME)
+    # saveTrainedModel(rl_agent.Q_eval, MODEL_NAME)
     print(1-(cooperation_level/nbr_episode))
 
 def test():
-    rl_agent = DeepRLNetwork(gamma=0.8, epsilon=0.1, lr=0.01, input_dim=[2], batch_size=64, n_actions=2)
+    rl_agent = DeepRLNetwork(gamma=0.8, epsilon=0.1, lr=0.001, input_dim=[2], batch_size=64, n_actions=2)
     rl_agent.Q_eval = loadTrainedModel(MODEL_NAME)
 
     print("0 - 0:", rl_agent.testState([0,0]))
